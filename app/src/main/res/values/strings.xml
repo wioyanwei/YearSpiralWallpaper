@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">年历螺旋</string>
+    <string name="wallpaper_name">2026 年历螺旋</string>
+    <string name="wallpaper_desc">365 天的黄金角螺旋动态壁纸，暗色为已过去的天数，亮色为剩余天数</string>
+</resources>
