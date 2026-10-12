@@ -16,7 +16,9 @@ import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import java.util.Calendar
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -49,6 +51,12 @@ private const val HERO_ITALIC = false     // 螺旋下的大数字是否也用�
 
 // 定义：穿越回来的年份 = 当前年份 + TRAVEL_YEAR_OFFSET（默认多一年，每年自动往后推）
 private const val TRAVEL_YEAR_OFFSET = 1
+
+// 字幕节奏（秒）：每一句停留多久、滚到下一句用多久；最后一个数是「空位」（读完留一拍空白再从头来）
+private val QUOTE_HOLD = floatArrayOf(2.6f, 2.2f, 2.6f, 4.2f, 0.4f)
+private const val QUOTE_GLIDE = 0.9f
+
+private fun quoteHold(slot: Int): Float = if (slot < QUOTE_HOLD.size) QUOTE_HOLD[slot] else 2.4f
 
 private fun whisperLines(currentYear: Int): Array<String> = arrayOf(
     "我是从${currentYear + TRAVEL_YEAR_OFFSET}年1月1日穿越回来的，",
@@ -99,12 +107,24 @@ class SpiralWallpaperService : WallpaperService() {
         private val dateNumDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500i; color = INK_DIM }
         private val dateNumInk = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif600i; color = INK }
 
+        // 穿越的话：字幕式向上滚动（每帧在动态层绘制）
+        private val qText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansRegular }
+        private val qNum = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500i }
+        private var qLines: Array<String> = emptyArray()
+        private var qX = 0f          // 左对齐的起点
+        private var qBase = 0f       // 焦点行（亮度正常的那一行）的基线
+        private var qStep = 0f       // 行距
+        private var qStart = SystemClock.uptimeMillis()
+
         private val drawRunner = Runnable { draw() }
 
         override fun onVisibilityChanged(v: Boolean) {
             visible = v
             handler.removeCallbacks(drawRunner)
-            if (v) handler.post(drawRunner)
+            if (v) {
+                qStart = SystemClock.uptimeMillis()   // 每次亮屏，字幕都从第一句重新开始
+                handler.post(drawRunner)
+            }
         }
 
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -168,6 +188,7 @@ class SpiralWallpaperService : WallpaperService() {
 
             c.drawBitmap(bmp, 0f, 0f, null)
             drawBreathingBall(c)
+            drawQuote(c)
             if (SHOW_DATE_LINE) drawDateLine(c, cal, w, h)
         }
 
@@ -279,32 +300,61 @@ class SpiralWallpaperService : WallpaperService() {
             c.drawText(numStr, x0, bigBase, numPaint)
             c.drawText("天", x0 + numW + gap, bigBase, unitPaint)
 
-            // 穿越的话（左对齐，整体居中；放在系统解锁图标下方，没有分割线）。
-            // 汉字用系统字体（直立），数字用 Fraunces；前三行约 59% 亮度，最后一句暖琥珀色，读下来有一个渐强
+            // 穿越的话：只在这里排版（字号、行距、位置），文字本身每帧在 drawQuote 里画
             val wSize = 0.097f * u
-            val wLine = 1.8f * wSize
-            val wText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansRegular; textSize = wSize; color = INK }
-            val wNum = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500i; textSize = wSize; color = INK }
-            val whisper = whisperLines(year)
+            qText.textSize = wSize
+            qNum.textSize = wSize
+            qStep = 1.8f * wSize
+            qLines = whisperLines(year)
             var maxW = 0f
-            for (line in whisper) maxW = max(maxW, lineWidth(line, wText, wNum))
-            val wx = (fw - maxW) / 2f
-            var by = fh * QUOTE_TOP + 0.13f * u + wSize
-            for ((i, line) in whisper.withIndex()) {
-                // 前三行约 59% 亮度的象牙白；最后一句用暖琥珀色，和小球、系统时钟同色系
-                val last = i == whisper.size - 1
-                val col = if (last) ACCENT_HOT else INK
-                wText.color = col
-                wNum.color = col
-                if (!last) {
-                    wText.alpha = 150
-                    wNum.alpha = 150
-                }
-                drawRuns(c, line, wx, by, wText, wNum)
-                by += wLine
-            }
+            for (line in qLines) maxW = max(maxW, lineWidth(line, qText, qNum))
+            qX = (fw - maxW) / 2f
+            // 三行窗口的中间那一行（焦点行）：落在原来四行文字的垂直中线上
+            qBase = fh * QUOTE_TOP + 0.13f * u + wSize + 1.5f * qStep
 
             return bmp
+        }
+
+        // ───────── 动态层：字幕式滚动 ─────────
+        // 每一行离焦点行的距离 d（单位：行）决定亮度：d=0 亮度正常；|d|=1 约 25%；|d|≥1.5 完全不见。
+        // 所以任何时刻最多 3 行可见：上面一行边走边暗直到消失，下面一行从看不见慢慢变亮。
+        // 节奏：停一会（读完这句）→ 用 0.9 秒平滑滚上去一行 → 再停。
+        private fun drawQuote(c: Canvas) {
+            val lines = qLines
+            if (lines.isEmpty()) return
+            val slots = lines.size + 1
+            var period = 0f
+            for (i in 0 until slots) period += quoteHold(i) + QUOTE_GLIDE
+            var t = ((SystemClock.uptimeMillis() - qStart) / 1000f) % period
+            var idx = 0
+            while (idx < slots - 1 && t >= quoteHold(idx) + QUOTE_GLIDE) {
+                t -= quoteHold(idx) + QUOTE_GLIDE
+                idx++
+            }
+            val hold = quoteHold(idx)
+            val pos = if (t < hold) {
+                idx.toFloat()
+            } else {
+                val x = min(1f, (t - hold) / QUOTE_GLIDE)
+                idx + x * x * (3f - 2f * x)           // 缓入缓出
+            }
+            val base = floor(pos).toInt()
+            for (k in base - 1..base + 2) {
+                val d = k - pos                       // >0 在焦点行下面，<0 在上面
+                val ad = abs(d)
+                if (ad >= 1.5f) continue
+                val cs = cos(PI.toFloat() * ad / 3f)
+                val a = (255f * cs * cs).roundToInt()
+                if (a <= 2) continue
+                val slot = ((k % slots) + slots) % slots
+                if (slot >= lines.size) continue      // 空位：什么都不画
+                val col = if (slot == lines.size - 1) ACCENT_HOT else INK
+                qText.color = col
+                qNum.color = col
+                qText.alpha = a
+                qNum.alpha = a
+                drawRuns(c, lines[slot], qX, qBase + d * qStep, qText, qNum)
+            }
         }
 
         // 把一行文字切成连续的「数字/英文」段和「汉字」段：数字段用 numPaint，其余用 textPaint
