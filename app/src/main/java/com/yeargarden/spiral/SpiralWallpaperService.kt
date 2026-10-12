@@ -30,7 +30,7 @@ private val BG_2 = Color.parseColor("#0A0810")
 private val INK = Color.parseColor("#F2ECE2")
 private val INK_DIM = Color.parseColor("#9B93A4")
 private val INK_FAINT = Color.parseColor("#7D7488")
-private val DOT_PAST = Color.parseColor("#3A3346")
+private val DOT_PAST = Color.parseColor("#4A4258")
 private val ACCENT = Color.parseColor("#F2A65A")
 private val ACCENT_HOT = Color.parseColor("#FFD9A0")
 private val SPHERE_HI = Color.parseColor("#FFF3E0")     // 球体高光
@@ -40,11 +40,12 @@ private val SPHERE_EDGE = Color.parseColor("#C2661A")   // 球体背光边缘
 private const val SHOW_YEAR = true            // 顶部年份；不想要就改成 false
 private const val SHOW_DATE_LINE = false      // 底部「月日 星期 时钟」一行；锁屏已有系统日期，默认关
 private const val YEAR_BASELINE = 0.085f      // 年份基线（占屏幕高度）
-private const val SPIRAL_CENTER = 0.42f       // 螺旋圆心：放在系统日期行下面
+private const val SPIRAL_CENTER = 0.435f      // 螺旋圆心：放在系统日期行下面，留出呼吸空间
 private const val RADIUS_OF_WIDTH = 0.34f     // 螺旋半径上限（占屏幕宽度）
-private const val RADIUS_OF_HEIGHT = 0.165f   // 螺旋半径上限（占屏幕高度）
+private const val RADIUS_OF_HEIGHT = 0.158f   // 螺旋半径上限（占屏幕高度）
 private const val QUOTE_TOP = 0.785f          // 穿越的话的起始位置：在系统解锁图标下方
 private const val DATE_BASELINE = 0.92f       // 底部日期行基线
+private const val HERO_ITALIC = false     // 螺旋下的大数字是否也用斜体（默认直立，更稳）
 
 // 定义：穿越回来的年份 = 当前年份 + TRAVEL_YEAR_OFFSET（默认多一年，每年自动往后推）
 private const val TRAVEL_YEAR_OFFSET = 1
@@ -75,6 +76,8 @@ class SpiralWallpaperService : WallpaperService() {
 
         private val serif600 = loadFont("fraunces-600.ttf", Typeface.create(Typeface.SERIF, Typeface.BOLD))
         private val serif500 = loadFont("fraunces-500.ttf", Typeface.create(Typeface.SERIF, Typeface.NORMAL))
+        private val serif500i = loadFont("fraunces-500-italic.ttf", Typeface.create(Typeface.SERIF, Typeface.ITALIC))
+        private val serif600i = loadFont("fraunces-600-italic.ttf", Typeface.create(Typeface.SERIF, Typeface.BOLD_ITALIC))
         private val sansRegular: Typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
         private val sansMedium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
@@ -93,8 +96,8 @@ class SpiralWallpaperService : WallpaperService() {
         private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
         // 底部日期行：汉字用系统字体，数字统一用 Fraunces
         private val dateDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansMedium; color = INK_DIM }
-        private val dateNumDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500; color = INK_DIM }
-        private val dateNumInk = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif600; color = INK }
+        private val dateNumDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500i; color = INK_DIM }
+        private val dateNumInk = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif600i; color = INK }
 
         private val drawRunner = Runnable { draw() }
 
@@ -248,7 +251,7 @@ class SpiralWallpaperService : WallpaperService() {
 
             // 顶部年份
             if (SHOW_YEAR) {
-                p.typeface = serif500
+                p.typeface = serif500i
                 p.textSize = 0.115f * u
                 p.letterSpacing = 0.12f
                 p.color = INK_FAINT
@@ -263,7 +266,7 @@ class SpiralWallpaperService : WallpaperService() {
             val spiralBottom = cy + u + 3.6f * s
             val bigBase = spiralBottom + 0.16f * u + 0.72f * bigSize
             val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                typeface = serif600; textSize = bigSize; color = INK
+                typeface = if (HERO_ITALIC) serif600i else serif600; textSize = bigSize; color = INK
             }
             val unitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 typeface = serif500; textSize = bigSize * 0.34f; color = INK_DIM
@@ -277,20 +280,26 @@ class SpiralWallpaperService : WallpaperService() {
             c.drawText("天", x0 + numW + gap, bigBase, unitPaint)
 
             // 穿越的话（左对齐，整体居中；放在系统解锁图标下方，没有分割线）。
-            // 汉字用系统字体（直立），数字用 Fraunces；前三行约 65% 亮度，最后一句全亮，读下来有一个渐强
+            // 汉字用系统字体（直立），数字用 Fraunces；前三行约 59% 亮度，最后一句暖琥珀色，读下来有一个渐强
             val wSize = 0.097f * u
             val wLine = 1.8f * wSize
             val wText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansRegular; textSize = wSize; color = INK }
-            val wNum = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500; textSize = wSize; color = INK }
+            val wNum = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500i; textSize = wSize; color = INK }
             val whisper = whisperLines(year)
             var maxW = 0f
             for (line in whisper) maxW = max(maxW, lineWidth(line, wText, wNum))
             val wx = (fw - maxW) / 2f
             var by = fh * QUOTE_TOP + 0.13f * u + wSize
             for ((i, line) in whisper.withIndex()) {
-                val a = if (i == whisper.size - 1) 255 else 166
-                wText.alpha = a
-                wNum.alpha = a
+                // 前三行约 59% 亮度的象牙白；最后一句用暖琥珀色，和小球、系统时钟同色系
+                val last = i == whisper.size - 1
+                val col = if (last) ACCENT_HOT else INK
+                wText.color = col
+                wNum.color = col
+                if (!last) {
+                    wText.alpha = 150
+                    wNum.alpha = 150
+                }
                 drawRuns(c, line, wx, by, wText, wNum)
                 by += wLine
             }
@@ -338,11 +347,11 @@ class SpiralWallpaperService : WallpaperService() {
             val ph = (tSec % 3.4f) / 3.4f
             val pulse = (0.5 - 0.5 * cos(2.0 * PI * ph)).toFloat()
 
-            val ball = todayR * 1.9f * (1f + 0.28f * pulse)
+            val ball = todayR * 2.1f * (1f + 0.28f * pulse)
 
             // 外圈光晕随呼吸扩张
             val haloR = ball * (2.6f + 2.2f * pulse)
-            val haloAlpha = (70 + 120 * pulse).roundToInt()
+            val haloAlpha = (95 + 95 * pulse).roundToInt()
             haloPaint.shader = RadialGradient(
                 todayX, todayY, haloR,
                 intArrayOf(Color.argb(haloAlpha, 242, 166, 90), Color.argb(0, 242, 166, 90)),

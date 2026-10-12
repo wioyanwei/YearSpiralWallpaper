@@ -8,11 +8,13 @@
 
 1. 注册一个免费的 GitHub 账号（已有的话跳过）：https://github.com/join
 2. 新建一个仓库（New repository），随便起个名字，设为 Public 或 Private 都行。
-3. 把这个文件夹里的所有文件（包括隐藏的 `.github` 文件夹）上传到那个仓库：
-   网页版最简单的办法是仓库页面点 "Add file → Upload files"，
-   把整个文件夹拖进去，点 "Commit changes"。
+3. 把这个文件夹里的文件上传到仓库（"Add file → Upload files"，拖进去，点 "Commit changes"）。
+   注意：GitHub 只认 `.github/workflows/` 这个隐藏路径里的流程文件，网页上传会跳过隐藏文件夹，
+   所以流程文件在本包里放在可见的 `github-workflow/build-apk.yml`。上传完后再手动建一次：
+   Add file → Create new file → 文件名框里直接输入 `.github/workflows/build-apk.yml`（输入 `/` 会自动建文件夹），
+   把 `github-workflow/build-apk.yml` 的内容粘贴进去，Commit。（仓库里已经有这个文件的话不用重复做。）
 4. 上传完成后，点仓库顶部的 **Actions** 标签页。
-   GitHub 会自动开始跑一个叫 "Build APK" 的流程（因为 `.github/workflows/build-apk.yml` 已经在里面了）。
+   GitHub 会自动开始跑一个叫 "Build APK" 的流程（因为 `.github/workflows/build-apk.yml` 已经在仓库里了）。
    第一次编译大概需要 3～6 分钟。
 5. 编译成功（绿色对勾）后，点进这次运行记录，
    页面最下面 "Artifacts" 里有一个 `YearSpiralWallpaper-debug-apk`，点它下载一个 zip，
@@ -60,3 +62,41 @@
 
 - 穿越的年份有了定义：穿越回来的年份 = 当前年份 + `TRAVEL_YEAR_OFFSET`（默认 1，即多一年）。今年显示 2027，到 2027 年自动变成 2028，不用再改代码。想改成多两年，把 `SpiralWallpaperService.kt` 顶部的 `TRAVEL_YEAR_OFFSET` 改成 2。
 - 今天那颗球：保留比其他球大、3.4 秒一次的呼吸、光晕起伏、向外扩散的涟漪；取消了闪烁和星芒。
+
+## 版本 5 的更新
+
+- 统一数字字体：壁纸里所有阿拉伯数字都用 Fraunces（汉字仍用系统字体，因为 Fraunces 不含汉字）。
+  - 顶部年份：Fraunces 500；螺旋下的大数字：Fraunces 600；
+  - 进度小字「2026 年已经过去 283 天（78%）」里的数字：原来是系统无衬线体，现在改成 Fraunces（283 保持琥珀色，用 600 字重）；
+  - 穿越的话里的年份和日期数字：Fraunces 300 斜体；
+  - 底部日期行（默认关闭）：月、日、时钟的数字同样改成 Fraunces。
+- 同一层级的数字字重一致，不同层级按主次区分字重（大数字最重，年份和小字居中，引文最轻）。
+
+## 版本 6 的更新
+
+- 穿越的话第一行的日期去掉了所有空格：「我是从2027年1月1日穿越回来的，」。年份仍由「当前年份 + `TRAVEL_YEAR_OFFSET`」自动算出。
+
+## 版本 7 的更新
+
+- 删掉了螺旋下方的进度小字（「已经过去 N 天（x%）」），剩余天数成为唯一主角。
+- 去掉螺旋中间的棕色光晕；下半屏渐变到近乎纯黑（OLED 更深更省电）。
+- 穿越的话：去掉分割线；前三行约 65% 亮度，最后一句「我会做出什么改变？」全亮；汉字用系统字体（直立），数字仍是 Fraunces。
+- 删除了不再使用的 `fraunces-300-italic.ttf`。
+- 流程文件改放在可见文件夹 `github-workflow/`（见上面第 3 步）。
+
+## 版本 8 的更新（按真机锁屏截图微调）
+
+- 螺旋略下移并缩小（`SPIRAL_CENTER` 0.435、`RADIUS_OF_HEIGHT` 0.158），顶端不再贴着系统日期行。
+- 引文最后一句改用暖琥珀色（`ACCENT_HOT`），前三行降到约 59% 亮度：系统锁屏会给壁纸盖一层暗遮罩，用颜色而不是亮度拉开层级。
+- 今天那颗球更大（系数 2.1），谷底光晕更亮，一眼能找到。
+- 已过去的暗点提亮（`DOT_PAST` #4A4258），一整年的体量在遮罩下仍然可读。
+
+## 版本 8 的更新（按真机锁屏截图调整）
+
+- 螺旋略微下移并缩小（`SPIRAL_CENTER` 0.435、`RADIUS_OF_HEIGHT` 0.158），顶端不再贴着系统日期行。
+- 引文最后一句「我会做出什么改变？」改用暖琥珀色（`ACCENT_HOT`），前三行约 59% 亮度；系统锁屏有暗遮罩，靠颜色拉开层级。
+- 今天那颗球更大（系数 1.9 → 2.1），呼吸谷底的光晕更亮（alpha 95～190）。
+- 已过去的暗点提亮到 `#4A4258`，整年的体量更可读。
+- 数字改斜体：顶部年份、引文里的数字、（默认关闭的）底部日期行用 Fraunces 斜体；汉字保持直立。
+  螺旋下的大数字「80」默认仍直立；想也改成斜体，把 `SpiralWallpaperService.kt` 顶部的 `HERO_ITALIC` 改成 `true`。
+- 新增字体文件 `fraunces-500-italic.ttf`、`fraunces-600-italic.ttf`。
