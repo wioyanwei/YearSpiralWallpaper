@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
@@ -42,14 +43,14 @@ private const val YEAR_BASELINE = 0.085f      // 年份基线（占屏幕高度�
 private const val SPIRAL_CENTER = 0.42f       // 螺旋圆心：放在系统日期行下面
 private const val RADIUS_OF_WIDTH = 0.34f     // 螺旋半径上限（占屏幕宽度）
 private const val RADIUS_OF_HEIGHT = 0.165f   // 螺旋半径上限（占屏幕高度）
-private const val QUOTE_TOP = 0.785f          // 穿越的话的分割线位置：在系统解锁图标下方
+private const val QUOTE_TOP = 0.785f          // 穿越的话的起始位置：在系统解锁图标下方
 private const val DATE_BASELINE = 0.92f       // 底部日期行基线
 
 // 定义：穿越回来的年份 = 当前年份 + TRAVEL_YEAR_OFFSET（默认多一年，每年自动往后推）
 private const val TRAVEL_YEAR_OFFSET = 1
 
 private fun whisperLines(currentYear: Int): Array<String> = arrayOf(
-    "我是从 ${currentYear + TRAVEL_YEAR_OFFSET}年 1月 1 日穿越回来的，",
+    "我是从${currentYear + TRAVEL_YEAR_OFFSET}年1月1日穿越回来的，",
     "当时的遗憾还记得吗？",
     "现在又拥有了一次重来的机会，",
     "我会做出什么改变？"
@@ -74,9 +75,7 @@ class SpiralWallpaperService : WallpaperService() {
 
         private val serif600 = loadFont("fraunces-600.ttf", Typeface.create(Typeface.SERIF, Typeface.BOLD))
         private val serif500 = loadFont("fraunces-500.ttf", Typeface.create(Typeface.SERIF, Typeface.NORMAL))
-        private val serifItalic = loadFont("fraunces-300-italic.ttf", Typeface.create(Typeface.SERIF, Typeface.ITALIC))
         private val sansRegular: Typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
-        private val sansBold: Typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         private val sansMedium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
         // 静态层缓存：背景、螺旋、文字都画在这里，每天或换尺寸才重画
@@ -92,8 +91,10 @@ class SpiralWallpaperService : WallpaperService() {
         private val specPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(215, 255, 255, 255) }
         private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+        // 底部日期行：汉字用系统字体，数字统一用 Fraunces
         private val dateDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansMedium; color = INK_DIM }
-        private val dateInk = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansBold; color = INK }
+        private val dateNumDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500; color = INK_DIM }
+        private val dateNumInk = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif600; color = INK }
 
         private val drawRunner = Runnable { draw() }
 
@@ -198,14 +199,18 @@ class SpiralWallpaperService : WallpaperService() {
             )
             c.drawRect(0f, 0f, fw, fh, bg)
 
-            // 螺旋背后淡淡的琥珀色光晕
-            val halo = Paint(Paint.ANTI_ALIAS_FLAG)
-            halo.shader = RadialGradient(
-                cx, cy, u * 1.25f,
-                intArrayOf(Color.argb(34, 242, 166, 90), Color.argb(0, 242, 166, 90)),
-                null, Shader.TileMode.CLAMP
+            // 下半屏渐入近乎纯黑（OLED 上更深、更省电），螺旋周围保留一点紫调；
+            // 五个色标近似一条平滑的 S 形过渡，避免出现明显的分界线
+            val fade = Paint()
+            fade.shader = LinearGradient(
+                0f, fh * 0.52f, 0f, fh,
+                intArrayOf(
+                    Color.argb(0, 3, 2, 5), Color.argb(35, 3, 2, 5), Color.argb(112, 3, 2, 5),
+                    Color.argb(189, 3, 2, 5), Color.argb(224, 3, 2, 5)
+                ),
+                floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1f), Shader.TileMode.CLAMP
             )
-            c.drawCircle(cx, cy, u * 1.25f, halo)
+            c.drawRect(0f, fh * 0.52f, fw, fh, fade)
 
             // 黄金角螺旋：已过去的天数是暗点，剩余的天数是发光的小圆球
             val pastPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = DOT_PAST }
@@ -271,37 +276,57 @@ class SpiralWallpaperService : WallpaperService() {
             c.drawText(numStr, x0, bigBase, numPaint)
             c.drawText("天", x0 + numW + gap, bigBase, unitPaint)
 
-            // 一行小字：已过去的进度
-            val subSize = 0.09f * u
-            val subDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansRegular; textSize = subSize; color = INK_DIM }
-            val subAccent = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansBold; textSize = subSize; color = ACCENT }
-            val pct = (today * 100f / total).roundToInt()
-            val sub1Base = bigBase + 0.14f * u + subSize
-            drawCentered(
-                c, cx, sub1Base, 0f,
-                listOf("$year 年已经过去 " to subDim, "$today" to subAccent, " 天（$pct%）" to subDim)
-            )
-
-            // 分割线 + 穿越的话（左对齐，整体居中；放在系统解锁图标下方）
+            // 穿越的话（左对齐，整体居中；放在系统解锁图标下方，没有分割线）。
+            // 汉字用系统字体（直立），数字用 Fraunces；前三行约 65% 亮度，最后一句全亮，读下来有一个渐强
             val wSize = 0.097f * u
             val wLine = 1.8f * wSize
-            val wPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                typeface = serifItalic; textSize = wSize; color = INK
-            }
+            val wText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansRegular; textSize = wSize; color = INK }
+            val wNum = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500; textSize = wSize; color = INK }
             val whisper = whisperLines(year)
             var maxW = 0f
-            for (line in whisper) maxW = max(maxW, wPaint.measureText(line))
+            for (line in whisper) maxW = max(maxW, lineWidth(line, wText, wNum))
             val wx = (fw - maxW) / 2f
-            val divY = fh * QUOTE_TOP
-            val divPaint = Paint().apply { color = Color.argb(26, 242, 236, 226) }
-            c.drawRect(wx, divY, wx + maxW, divY + max(2f, 0.006f * u), divPaint)
-            var by = divY + 0.13f * u + wSize
-            for (line in whisper) {
-                c.drawText(line, wx, by, wPaint)
+            var by = fh * QUOTE_TOP + 0.13f * u + wSize
+            for ((i, line) in whisper.withIndex()) {
+                val a = if (i == whisper.size - 1) 255 else 166
+                wText.alpha = a
+                wNum.alpha = a
+                drawRuns(c, line, wx, by, wText, wNum)
                 by += wLine
             }
 
             return bmp
+        }
+
+        // 把一行文字切成连续的「数字/英文」段和「汉字」段：数字段用 numPaint，其余用 textPaint
+        private fun isLatin(ch: Char): Boolean = ch.code < 128
+
+        private fun lineWidth(line: String, textPaint: Paint, numPaint: Paint): Float {
+            var total = 0f
+            var start = 0
+            while (start < line.length) {
+                val latin = isLatin(line[start])
+                var end = start + 1
+                while (end < line.length && isLatin(line[end]) == latin) end++
+                total += (if (latin) numPaint else textPaint).measureText(line, start, end)
+                start = end
+            }
+            return total
+        }
+
+        private fun drawRuns(c: Canvas, line: String, x: Float, base: Float, textPaint: Paint, numPaint: Paint) {
+            var px = x
+            var start = 0
+            while (start < line.length) {
+                val latin = isLatin(line[start])
+                var end = start + 1
+                while (end < line.length && isLatin(line[end]) == latin) end++
+                val paint = if (latin) numPaint else textPaint
+                paint.textAlign = Paint.Align.LEFT
+                c.drawText(line, start, end, px, base, paint)
+                px += paint.measureText(line, start, end)
+                start = end
+            }
         }
 
         // ───────── 动态层：今天的圆球（呼吸：光晕起伏 + 涟漪扩散）─────────
@@ -343,14 +368,22 @@ class SpiralWallpaperService : WallpaperService() {
         private fun drawDateLine(c: Canvas, cal: Calendar, w: Int, h: Int) {
             val size = 0.125f * uPx
             dateDim.textSize = size
-            dateInk.textSize = size
+            dateNumDim.textSize = size
+            dateNumInk.textSize = size
             val month = cal.get(Calendar.MONTH) + 1
             val day = cal.get(Calendar.DAY_OF_MONTH)
             val week = arrayOf("日", "一", "二", "三", "四", "五", "六")[cal.get(Calendar.DAY_OF_WEEK) - 1]
             val time = String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+            val sp = " " to dateDim      // 组与组之间的空隙（一个全角空格）
             drawCentered(
-                c, w / 2f, h * DATE_BASELINE, size * 0.9f,
-                listOf("${month}月${day}日" to dateDim, "周$week" to dateDim, time to dateInk)
+                c, w / 2f, h * DATE_BASELINE, 0f,
+                listOf(
+                    "$month" to dateNumDim, "月" to dateDim, "$day" to dateNumDim, "日" to dateDim,
+                    sp,
+                    "周$week" to dateDim,
+                    sp,
+                    time to dateNumInk
+                )
             )
         }
 
