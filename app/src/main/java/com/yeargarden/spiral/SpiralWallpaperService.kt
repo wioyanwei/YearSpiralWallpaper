@@ -1,5 +1,9 @@
 package com.yeargarden.spiral
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
@@ -15,6 +19,7 @@ import android.os.SystemClock
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
 import java.util.Calendar
+import org.json.JSONArray
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -52,18 +57,32 @@ private const val HERO_ITALIC = false     // 螺旋下的大数字是否也用�
 // 定义：穿越回来的年份 = 当前年份 + TRAVEL_YEAR_OFFSET（默认多一年，每年自动往后推）
 private const val TRAVEL_YEAR_OFFSET = 1
 
-// 字幕节奏（秒）：每一句停留多久、滚到下一句用多久；最后一个数是「空位」（读完留一拍空白再从头来）
-private val QUOTE_HOLD = floatArrayOf(2.6f, 2.2f, 2.6f, 4.2f, 0.4f)
+// 字幕节奏（秒）：滚动一行用时；每一行停留多久由字数决定（见 setQuote）
 private const val QUOTE_GLIDE = 0.9f
 
-private fun quoteHold(slot: Int): Float = if (slot < QUOTE_HOLD.size) QUOTE_HOLD[slot] else 2.4f
+// 语录库：app/src/main/assets/quotes.json，每条 {"lines": [...], "by": "出处"}。
+// 文字里的 {Y} 会换成「当前年份 + TRAVEL_YEAR_OFFSET」（只有原创穿越语用到）。
+private class Quote(val lines: List<String>, val by: String)
 
-private fun whisperLines(currentYear: Int): Array<String> = arrayOf(
-    "我是从${currentYear + TRAVEL_YEAR_OFFSET}年1月1日穿越回来的，",
-    "当时的遗憾还记得吗？",
-    "现在又拥有了一次重来的机会，",
-    "我会做出什么改变？"
+private val FALLBACK_QUOTE = Quote(
+    listOf("我是从{Y}年1月1日穿越回来的，", "当时的遗憾还记得吗？", "现在又拥有了一次重来的机会，", "我会做出什么改变？"), ""
 )
+
+private fun loadQuotes(ctx: Context): List<Quote> = try {
+    val text = ctx.assets.open("quotes.json").bufferedReader().use { it.readText() }
+    val arr = JSONArray(text)
+    val out = ArrayList<Quote>()
+    for (i in 0 until arr.length()) {
+        val o = arr.getJSONObject(i)
+        val ls = o.getJSONArray("lines")
+        val lines = ArrayList<String>()
+        for (j in 0 until ls.length()) lines.add(ls.getString(j))
+        if (lines.isNotEmpty()) out.add(Quote(lines, o.optString("by", "")))
+    }
+    if (out.isEmpty()) listOf(FALLBACK_QUOTE) else out
+} catch (e: Exception) {
+    listOf(FALLBACK_QUOTE)
+}
 
 class SpiralWallpaperService : WallpaperService() {
 
@@ -110,11 +129,71 @@ class SpiralWallpaperService : WallpaperService() {
         // 穿越的话：字幕式向上滚动（每帧在动态层绘制）
         private val qText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansRegular }
         private val qNum = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500i }
-        private var qLines: Array<String> = emptyArray()
+        private var qSlots: List<String> = emptyList()   // 正文各行 + 最后一行出处
+        private var qBodyCount = 0                       // 正文行数（出处不算）
+        private var qHolds = FloatArray(0)               // 每个槽位停留多久（最后一个是「空位」）
+        private var qWidth = 0f
+        private var qLayoutDirty = true
         private var qX = 0f          // 左对齐的起点
         private var qBase = 0f       // 焦点行（亮度正常的那一行）的基线
         private var qStep = 0f       // 行距
         private var qStart = SystemClock.uptimeMillis()
+
+        // ───────── 语录库：每次锁屏后自动换一条 ─────────
+        // 「洗牌袋」：把全部语录洗乱，一条一条抽，抽完一整轮才会再出现重复；袋子存在 SharedPreferences 里，重启也不丢。
+        private val quotes: List<Quote> = loadQuotes(this@SpiralWallpaperService)
+        private val prefs by lazy {
+            this@SpiralWallpaperService.getSharedPreferences("quote_bag", Context.MODE_PRIVATE)
+        }
+
+        private fun pickNext() {
+            val bag = (prefs.getString("bag", "") ?: "").split(",")
+                .mapNotNull { it.toIntOrNull() }.filter { it in quotes.indices }.toMutableList()
+            if (bag.isEmpty()) {
+                bag.addAll(quotes.indices.shuffled())
+                val last = prefs.getInt("last", -1)
+                if (bag.size > 1 && bag[0] == last) {          // 新一轮的第一条不要和上一轮最后一条相同
+                    val first = bag[0]
+                    bag[0] = bag[bag.size - 1]
+                    bag[bag.size - 1] = first
+                }
+            }
+            val idx = bag.removeAt(0)
+            prefs.edit().putString("bag", bag.joinToString(",")).putInt("last", idx).apply()
+            setQuote(quotes[idx])
+        }
+
+        private fun setQuote(q: Quote) {
+            val year = Calendar.getInstance().get(Calendar.YEAR) + TRAVEL_YEAR_OFFSET
+            val body = q.lines.map { it.replace("{Y}", "$year") }
+            qBodyCount = body.size
+            qSlots = if (q.by.isEmpty()) body else body + "—— ${q.by}"
+            // 停留时间：约 1.6 秒 + 每字 0.12 秒（限制在 2.2～4 秒）；正文最后一句多停 1.2 秒；出处停 2.4 秒；末尾空位 0.5 秒
+            val holds = FloatArray(qSlots.size + 1)
+            for (i in qSlots.indices) {
+                holds[i] = if (i >= qBodyCount) 2.4f
+                else min(4f, max(2.2f, 1.6f + 0.12f * qSlots[i].length)) + (if (i == qBodyCount - 1) 1.2f else 0f)
+            }
+            holds[qSlots.size] = 0.5f
+            qHolds = holds
+            qLayoutDirty = true
+            qStart = SystemClock.uptimeMillis()
+        }
+
+        private val screenOffReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                pickNext()          // 锁屏的瞬间就换好下一条，下次亮屏直接是新的
+            }
+        }
+
+        override fun onCreate(surfaceHolder: SurfaceHolder) {
+            super.onCreate(surfaceHolder)
+            pickNext()
+            try {
+                this@SpiralWallpaperService.registerReceiver(screenOffReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
+            } catch (e: Exception) {
+            }
+        }
 
         private val drawRunner = Runnable { draw() }
 
@@ -142,6 +221,10 @@ class SpiralWallpaperService : WallpaperService() {
             super.onDestroy()
             visible = false
             handler.removeCallbacks(drawRunner)
+            try {
+                this@SpiralWallpaperService.unregisterReceiver(screenOffReceiver)
+            } catch (e: Exception) {
+            }
             cache?.recycle()
             cache = null
         }
@@ -305,10 +388,8 @@ class SpiralWallpaperService : WallpaperService() {
             qText.textSize = wSize
             qNum.textSize = wSize
             qStep = 1.8f * wSize
-            qLines = whisperLines(year)
-            var maxW = 0f
-            for (line in qLines) maxW = max(maxW, lineWidth(line, qText, qNum))
-            qX = (fw - maxW) / 2f
+            qWidth = fw
+            qLayoutDirty = true
             // 三行窗口的中间那一行（焦点行）：落在原来四行文字的垂直中线上
             qBase = fh * QUOTE_TOP + 0.13f * u + wSize + 1.5f * qStep
 
@@ -320,18 +401,24 @@ class SpiralWallpaperService : WallpaperService() {
         // 所以任何时刻最多 3 行可见：上面一行边走边暗直到消失，下面一行从看不见慢慢变亮。
         // 节奏：停一会（读完这句）→ 用 0.9 秒平滑滚上去一行 → 再停。
         private fun drawQuote(c: Canvas) {
-            val lines = qLines
-            if (lines.isEmpty()) return
+            val lines = qSlots
+            if (lines.isEmpty() || qWidth <= 0f) return
+            if (qLayoutDirty) {                       // 整块文字按最宽的一行左对齐并居中
+                var maxW = 0f
+                for (line in lines) maxW = max(maxW, lineWidth(line, qText, qNum))
+                qX = (qWidth - maxW) / 2f
+                qLayoutDirty = false
+            }
             val slots = lines.size + 1
             var period = 0f
-            for (i in 0 until slots) period += quoteHold(i) + QUOTE_GLIDE
+            for (i in 0 until slots) period += qHolds[i] + QUOTE_GLIDE
             var t = ((SystemClock.uptimeMillis() - qStart) / 1000f) % period
             var idx = 0
-            while (idx < slots - 1 && t >= quoteHold(idx) + QUOTE_GLIDE) {
-                t -= quoteHold(idx) + QUOTE_GLIDE
+            while (idx < slots - 1 && t >= qHolds[idx] + QUOTE_GLIDE) {
+                t -= qHolds[idx] + QUOTE_GLIDE
                 idx++
             }
-            val hold = quoteHold(idx)
+            val hold = qHolds[idx]
             val pos = if (t < hold) {
                 idx.toFloat()
             } else {
@@ -348,7 +435,12 @@ class SpiralWallpaperService : WallpaperService() {
                 if (a <= 2) continue
                 val slot = ((k % slots) + slots) % slots
                 if (slot >= lines.size) continue      // 空位：什么都不画
-                val col = if (slot == lines.size - 1) ACCENT_HOT else INK
+                // 正文最后一句用暖琥珀色；出处用灰紫色小字感
+                val col = when {
+                    slot >= qBodyCount -> INK_DIM
+                    slot == qBodyCount - 1 -> ACCENT_HOT
+                    else -> INK
+                }
                 qText.color = col
                 qNum.color = col
                 qText.alpha = a
