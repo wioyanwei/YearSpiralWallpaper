@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
@@ -30,18 +31,6 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
-
-// ───────── 颜色（与最初的网页卡片一致）─────────
-private val BG_1 = Color.parseColor("#171320")
-private val BG_2 = Color.parseColor("#0A0810")
-private val INK = Color.parseColor("#F2ECE2")
-private val INK_DIM = Color.parseColor("#9B93A4")
-private val INK_FAINT = Color.parseColor("#7D7488")
-private val DOT_PAST = Color.parseColor("#4A4258")
-private val ACCENT = Color.parseColor("#F2A65A")
-private val ACCENT_HOT = Color.parseColor("#FFD9A0")
-private val SPHERE_HI = Color.parseColor("#FFF3E0")     // 球体高光
-private val SPHERE_EDGE = Color.parseColor("#C2661A")   // 球体背光边缘
 
 // ───────── 版面（以 1080×2410 的手机为基准，想微调位置只改这几个比例）─────────
 private const val SHOW_YEAR = true            // 顶部年份；不想要就改成 false
@@ -122,9 +111,15 @@ class SpiralWallpaperService : WallpaperService() {
         private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
         // 底部日期行：汉字用系统字体，数字统一用 Fraunces
-        private val dateDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansMedium; color = INK_DIM }
-        private val dateNumDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500i; color = INK_DIM }
-        private val dateNumInk = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif600i; color = INK }
+        private val dateDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansMedium }
+        private val dateNumDim = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif500i }
+        private val dateNumInk = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = serif600i }
+
+        // 配色：见 Palettes.kt。设置页改了配色会立刻生效；随机模式下每次锁屏换一套
+        private var pal: Palette = Palettes.all[0]
+        private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            pal = Palettes.current(this@SpiralWallpaperService)
+        }
 
         // 穿越的话：字幕式向上滚动（每帧在动态层绘制）
         private val qText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansRegular }
@@ -183,11 +178,15 @@ class SpiralWallpaperService : WallpaperService() {
         private val screenOffReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 pickNext()          // 锁屏的瞬间就换好下一条，下次亮屏直接是新的
+                Palettes.rotate(this@SpiralWallpaperService)
             }
         }
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
+            pal = Palettes.current(this@SpiralWallpaperService)
+            this@SpiralWallpaperService.getSharedPreferences(Palettes.PREFS, Context.MODE_PRIVATE)
+                .registerOnSharedPreferenceChangeListener(settingsListener)
             pickNext()
             try {
                 this@SpiralWallpaperService.registerReceiver(screenOffReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
@@ -221,6 +220,8 @@ class SpiralWallpaperService : WallpaperService() {
             super.onDestroy()
             visible = false
             handler.removeCallbacks(drawRunner)
+            this@SpiralWallpaperService.getSharedPreferences(Palettes.PREFS, Context.MODE_PRIVATE)
+                .unregisterOnSharedPreferenceChangeListener(settingsListener)
             try {
                 this@SpiralWallpaperService.unregisterReceiver(screenOffReceiver)
             } catch (e: Exception) {
@@ -256,7 +257,7 @@ class SpiralWallpaperService : WallpaperService() {
             val year = cal.get(Calendar.YEAR)
             val today = cal.get(Calendar.DAY_OF_YEAR)
             val total = cal.getActualMaximum(Calendar.DAY_OF_YEAR)
-            val key = "${w}x$h-$year-$today"
+            val key = "${w}x$h-$year-$today-${pal.name}"
 
             val cached = cache
             val bmp: Bitmap = if (cached != null && key == cacheKey) {
@@ -302,7 +303,7 @@ class SpiralWallpaperService : WallpaperService() {
             val bg = Paint()
             bg.shader = RadialGradient(
                 cx, fh * 0.28f, max(fw, fh) * 0.85f,
-                intArrayOf(BG_1, BG_2), floatArrayOf(0f, 0.8f), Shader.TileMode.CLAMP
+                intArrayOf(pal.bg1, pal.bg2), floatArrayOf(0f, 0.8f), Shader.TileMode.CLAMP
             )
             c.drawRect(0f, 0f, fw, fh, bg)
 
@@ -312,17 +313,17 @@ class SpiralWallpaperService : WallpaperService() {
             fade.shader = LinearGradient(
                 0f, fh * 0.52f, 0f, fh,
                 intArrayOf(
-                    Color.argb(0, 3, 2, 5), Color.argb(35, 3, 2, 5), Color.argb(112, 3, 2, 5),
-                    Color.argb(189, 3, 2, 5), Color.argb(224, 3, 2, 5)
+                    withAlpha(pal.fade, 0), withAlpha(pal.fade, 35), withAlpha(pal.fade, 112),
+                    withAlpha(pal.fade, 189), withAlpha(pal.fade, 224)
                 ),
                 floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1f), Shader.TileMode.CLAMP
             )
             c.drawRect(0f, fh * 0.52f, fw, fh, fade)
 
             // 黄金角螺旋：已过去的天数是暗点，剩余的天数是发光的小圆球
-            val pastPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = DOT_PAST }
+            val pastPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.past }
             val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = ACCENT
+                color = pal.accent
                 maskFilter = BlurMaskFilter(2.6f * s * 2.0f, BlurMaskFilter.Blur.NORMAL)
             }
             val golden = Math.toRadians(137.50776405003785)
@@ -346,7 +347,7 @@ class SpiralWallpaperService : WallpaperService() {
                     else -> {
                         val ball = r * 1.2f
                         c.drawCircle(x, y, ball, glowPaint)
-                        drawSphere(c, x, y, ball, SPHERE_HI, ACCENT, SPHERE_EDGE)
+                        drawSphere(c, x, y, ball, pal.hi, pal.accent, pal.edge)
                     }
                 }
             }
@@ -358,7 +359,7 @@ class SpiralWallpaperService : WallpaperService() {
                 p.typeface = serif500i
                 p.textSize = 0.115f * u
                 p.letterSpacing = 0.12f
-                p.color = INK_FAINT
+                p.color = pal.faint
                 p.textAlign = Paint.Align.CENTER
                 c.drawText("$year", cx, fh * YEAR_BASELINE, p)
                 p.letterSpacing = 0f
@@ -370,10 +371,10 @@ class SpiralWallpaperService : WallpaperService() {
             val spiralBottom = cy + u + 3.6f * s
             val bigBase = spiralBottom + 0.16f * u + 0.72f * bigSize
             val numPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                typeface = if (HERO_ITALIC) serif600i else serif600; textSize = bigSize; color = INK
+                typeface = if (HERO_ITALIC) serif600i else serif600; textSize = bigSize; color = pal.ink
             }
             val unitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                typeface = serif500; textSize = bigSize * 0.34f; color = INK_DIM
+                typeface = serif500; textSize = bigSize * 0.34f; color = pal.dim
             }
             val numStr = "$remain"
             val gap = 0.04f * u
@@ -437,9 +438,9 @@ class SpiralWallpaperService : WallpaperService() {
                 if (slot >= lines.size) continue      // 空位：什么都不画
                 // 正文最后一句用暖琥珀色；出处用灰紫色小字感
                 val col = when {
-                    slot >= qBodyCount -> INK_DIM
-                    slot == qBodyCount - 1 -> ACCENT_HOT
-                    else -> INK
+                    slot >= qBodyCount -> pal.dim
+                    slot == qBodyCount - 1 -> pal.hot
+                    else -> pal.ink
                 }
                 qText.color = col
                 qNum.color = col
@@ -496,7 +497,7 @@ class SpiralWallpaperService : WallpaperService() {
             val haloAlpha = (95 + 95 * pulse).roundToInt()
             haloPaint.shader = RadialGradient(
                 todayX, todayY, haloR,
-                intArrayOf(Color.argb(haloAlpha, 242, 166, 90), Color.argb(0, 242, 166, 90)),
+                intArrayOf(withAlpha(pal.accent, haloAlpha), withAlpha(pal.accent, 0)),
                 null, Shader.TileMode.CLAMP
             )
             c.drawCircle(todayX, todayY, haloR, haloPaint)
@@ -504,20 +505,23 @@ class SpiralWallpaperService : WallpaperService() {
             // 一圈向外扩散并淡出的涟漪
             val ringAlpha = ((1f - ph).pow(1.6f) * 150f).roundToInt()
             if (ringAlpha > 2) {
-                ringPaint.color = Color.argb(ringAlpha, 242, 166, 90)
+                ringPaint.color = withAlpha(pal.accent, ringAlpha)
                 ringPaint.strokeWidth = max(2f, todayR * 0.22f)
                 c.drawCircle(todayX, todayY, ball * (1.2f + 3.6f * ph), ringPaint)
             }
 
             // 球体本身：吸气时更亮、更暖
-            val mid = blend(ACCENT, ACCENT_HOT, 0.4f + 0.6f * pulse)
-            val edge = blend(SPHERE_EDGE, ACCENT, 0.5f * pulse)
-            drawSphere(c, todayX, todayY, ball, SPHERE_HI, mid, edge)
+            val mid = blend(pal.accent, pal.hot, 0.4f + 0.6f * pulse)
+            val edge = blend(pal.edge, pal.accent, 0.5f * pulse)
+            drawSphere(c, todayX, todayY, ball, pal.hi, mid, edge)
         }
 
         // ───────── 可选：底部一行（月日 / 星期 / 时钟）─────────
         private fun drawDateLine(c: Canvas, cal: Calendar, w: Int, h: Int) {
             val size = 0.125f * uPx
+            dateDim.color = pal.dim
+            dateNumDim.color = pal.dim
+            dateNumInk.color = pal.ink
             dateDim.textSize = size
             dateNumDim.textSize = size
             dateNumInk.textSize = size
