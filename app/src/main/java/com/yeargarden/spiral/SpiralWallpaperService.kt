@@ -48,6 +48,7 @@ private const val TRAVEL_YEAR_OFFSET = 1
 
 // 字幕节奏（秒）：滚动一行用时；每一行停留多久由字数决定（见 setQuote）
 private const val QUOTE_GLIDE = 0.9f
+private const val QUOTE_SCROLL = false   // true = 字幕式向上滚动；false = 静态显示整段（默认）
 
 // 语录库：app/src/main/assets/quotes.json，每条 {"lines": [...], "by": "出处"}。
 // 文字里的 {Y} 会换成「当前年份 + TRAVEL_YEAR_OFFSET」（只有原创穿越语用到）。
@@ -128,6 +129,7 @@ class SpiralWallpaperService : WallpaperService() {
         private var qBodyCount = 0                       // 正文行数（出处不算）
         private var qHolds = FloatArray(0)               // 每个槽位停留多久（最后一个是「空位」）
         private var qWidth = 0f
+        private var qHeight = 0f
         private var qLayoutDirty = true
         private var qX = 0f          // 左对齐的起点
         private var qBase = 0f       // 焦点行（亮度正常的那一行）的基线
@@ -390,6 +392,7 @@ class SpiralWallpaperService : WallpaperService() {
             qNum.textSize = wSize
             qStep = 1.8f * wSize
             qWidth = fw
+            qHeight = fh
             qLayoutDirty = true
             // 三行窗口的中间那一行（焦点行）：落在原来四行文字的垂直中线上
             qBase = fh * QUOTE_TOP + 0.13f * u + wSize + 1.5f * qStep
@@ -409,6 +412,10 @@ class SpiralWallpaperService : WallpaperService() {
                 for (line in lines) maxW = max(maxW, lineWidth(line, qText, qNum))
                 qX = (qWidth - maxW) / 2f
                 qLayoutDirty = false
+            }
+            if (!QUOTE_SCROLL) {
+                drawQuoteStatic(c, lines)
+                return
             }
             val slots = lines.size + 1
             var period = 0f
@@ -447,6 +454,28 @@ class SpiralWallpaperService : WallpaperService() {
                 qText.alpha = a
                 qNum.alpha = a
                 drawRuns(c, lines[slot], qX, qBase + d * qStep, qText, qNum)
+            }
+        }
+
+        // 静态显示：整段一次画出，以焦点行为中线上下对称排开；行数多时自动收紧行距，不压到解锁图标和底部提示
+        private fun drawQuoteStatic(c: Canvas, lines: List<String>) {
+            val n = lines.size
+            val step = if (n > 1) min(qStep, qHeight * 0.1f / (n - 1)) else qStep
+            var by = qBase - (n - 1) * step / 2f
+            for ((i, line) in lines.withIndex()) {
+                val col: Int
+                val a: Int
+                when {
+                    i >= qBodyCount -> { col = pal.dim; a = 255 }          // 出处
+                    i == qBodyCount - 1 -> { col = pal.hot; a = 255 }      // 正文最后一句：暖色
+                    else -> { col = pal.ink; a = 150 }                     // 前面几句：约 59% 亮度
+                }
+                qText.color = col
+                qNum.color = col
+                qText.alpha = a
+                qNum.alpha = a
+                drawRuns(c, line, qX, by, qText, qNum)
+                by += step
             }
         }
 
