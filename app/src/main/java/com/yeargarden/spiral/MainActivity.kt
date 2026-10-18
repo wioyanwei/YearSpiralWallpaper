@@ -18,6 +18,8 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.widget.SwitchCompat
 import androidx.appcompat.app.AppCompatActivity
 
 // 设置页：选配色。同时也是系统壁纸选择页里「设置」按钮打开的页面。
@@ -100,6 +102,58 @@ class MainActivity : AppCompatActivity() {
 
         for ((i, pal) in Palettes.all.withIndex()) addRow(pal.name, "", listOf(pal), i)
         addRow("每次锁屏随机换", "锁屏的瞬间换成另一套", Palettes.all, Palettes.AUTO)
+
+        // ───── 动效开关 ─────
+        val fxTitle = text("动效", 20f, "#F2ECE2")
+        fxTitle.setPadding(0, px(28), 0, px(4))
+        col.addView(fxTitle)
+        for ((key, title, desc) in Fx.toggles) {
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            row.gravity = Gravity.CENTER_VERTICAL
+            row.setPadding(px(4), px(10), px(4), px(10))
+            val box = LinearLayout(this)
+            box.orientation = LinearLayout.VERTICAL
+            box.addView(text(title, 16f, "#F2ECE2"))
+            box.addView(text(desc, 12f, "#9B93A4"))
+            row.addView(box, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            val sw = SwitchCompat(this)
+            sw.isChecked = Fx.on(this, key)
+            sw.setOnCheckedChangeListener { _, on ->
+                getSharedPreferences(Palettes.PREFS, Context.MODE_PRIVATE).edit().putBoolean(key, on).apply()
+            }
+            row.addView(sw)
+            col.addView(row)
+        }
+
+        val replay = Button(this)
+        replay.text = "播放一次午夜动画（回到桌面或锁屏即可看到）"
+        replay.setOnClickListener {
+            getSharedPreferences(Palettes.PREFS, Context.MODE_PRIVATE).edit()
+                .putLong(Fx.REPLAY, System.currentTimeMillis()).apply()
+            Toast.makeText(this, "回到桌面或锁屏，就会播放", Toast.LENGTH_SHORT).show()
+        }
+        val rlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        rlp.topMargin = px(16)
+        col.addView(replay, rlp)
+
+        val ny = Button(this)
+        ny.text = "播放一次跨年仪式（约 6 秒）"
+        ny.setOnClickListener {
+            getSharedPreferences(Palettes.PREFS, Context.MODE_PRIVATE).edit()
+                .putLong(Fx.REPLAY_NY, System.currentTimeMillis()).apply()
+            Toast.makeText(this, "回到桌面或锁屏，就会播放", Toast.LENGTH_SHORT).show()
+        }
+        val nlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        nlp.topMargin = px(8)
+        col.addView(ny, nlp)
+
+        val cal = Button(this)
+        cal.text = "打开可触摸的年历"
+        cal.setOnClickListener { startActivity(Intent(this, CalendarActivity::class.java)) }
+        val clp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        clp.topMargin = px(8)
+        col.addView(cal, clp)
 
         val btn = Button(this)
         btn.text = "设为动态壁纸"
