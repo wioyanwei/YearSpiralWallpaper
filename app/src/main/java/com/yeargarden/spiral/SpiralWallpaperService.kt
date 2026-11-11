@@ -436,15 +436,18 @@ class SpiralWallpaperService : WallpaperService() {
         }
 
         // 夜里：亮色向更深的「篝火金」靠拢；电量低：绯红余烬
+        private fun todayWeekday(): Int {
+            val cal = Calendar.getInstance()
+            return Week.weekday(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR) - 1)
+        }
+
         private fun computeTint(step: Int, ember: Boolean): Tint {
             if (ember) return EMBER_TINT
             val t = step / NIGHT_STEPS.toFloat()
-            return Tint(
-                blend(pal.accent, pal.edge, 0.38f * t),
-                blend(pal.hot, pal.accent, 0.45f * t),
-                blend(pal.hi, pal.hot, 0.35f * t),
-                pal.edge
-            )
+            // 今天那颗球 / 光晕 / 涟漪，用「今天是星期几」对应的颜色
+            val wd = todayWeekday()
+            val mid = Week.mid(wd, t)
+            return Tint(mid, blend(mid, Color.WHITE, 0.3f), Week.hi(wd, t), Week.edge(wd, t))
         }
 
         // ───────── 穿越的话（语录）─────────
@@ -768,8 +771,11 @@ class SpiralWallpaperService : WallpaperService() {
             val past = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
             val pc = Canvas(past)
             pc.translate(-layerOx, -layerOy)
-            val pastPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.past }
-            for (k in 0 until g.todayIdx) pc.drawCircle(g.x[k], g.y[k], g.r[k], pastPaint)
+            val pastPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+            for (k in 0 until g.todayIdx) {
+                pastPaint.color = Week.past(Week.weekday(year, k), nightT)
+                pc.drawCircle(g.x[k], g.y[k], g.r[k] * 1.2f * Week.PAST_SCALE, pastPaint)
+            }
             pastBmp = past
 
             if (!ember) {
@@ -781,9 +787,13 @@ class SpiralWallpaperService : WallpaperService() {
                     maskFilter = BlurMaskFilter(2.6f * s * 2.0f, BlurMaskFilter.Blur.NORMAL)
                 }
                 for (k in g.todayIdx + 1 until total) {
+                    val wd = Week.weekday(year, k)
+                    val mid = Week.mid(wd, nightT)
                     val ball = g.r[k] * 1.2f
+                    glowPaint.color = mid
+                    glowPaint.alpha = 70                      // 光晕收得很淡，免得相邻颜色糊在一起
                     lc.drawCircle(g.x[k], g.y[k], ball, glowPaint)
-                    drawSphere(lc, g.x[k], g.y[k], ball, tint.hi, tint.accent, tint.edge)
+                    drawSphere(lc, g.x[k], g.y[k], ball, Week.hi(wd, nightT), mid, Week.edge(wd, nightT))
                 }
                 litBmp = lit
             } else {
@@ -864,8 +874,12 @@ class SpiralWallpaperService : WallpaperService() {
             val b = Bitmap.createBitmap(ref.width, ref.height, Bitmap.Config.ARGB_8888)
             val dc = Canvas(b)
             dc.translate(-layerOx, -layerOy)
-            val pp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.past }
-            for (k in 0 until g.total) dc.drawCircle(g.x[k], g.y[k], g.r[k], pp)
+            val pp = Paint(Paint.ANTI_ALIAS_FLAG)
+            val yr = Calendar.getInstance().get(Calendar.YEAR)
+            for (k in 0 until g.total) {
+                pp.color = Week.past(Week.weekday(yr, k), nightT)
+                dc.drawCircle(g.x[k], g.y[k], g.r[k] * 1.2f * Week.PAST_SCALE, pp)
+            }
             darkBmp = b
             return b
         }
@@ -1010,13 +1024,15 @@ class SpiralWallpaperService : WallpaperService() {
             val fade = 1f - ease((rt / 1.0f).coerceIn(0f, 1f))
             if (fade > 0.01f) {
                 val b = g.r[yi] * 1.2f
+                val ywd = Week.weekday(Calendar.getInstance().get(Calendar.YEAR), yi)
+                val ymid = Week.mid(ywd, nightT)
                 haloPaint.shader = RadialGradient(
                     yx, yy, b * 3.2f,
-                    intArrayOf(withAlpha(tint.accent, (150f * fade).toInt()), withAlpha(tint.accent, 0)),
+                    intArrayOf(withAlpha(ymid, (150f * fade).toInt()), withAlpha(ymid, 0)),
                     null, Shader.TileMode.CLAMP
                 )
                 c.drawCircle(yx, yy, b * 3.2f, haloPaint)
-                drawSphere(c, yx, yy, b, tint.hi, tint.accent, tint.edge, (255f * fade).toInt())
+                drawSphere(c, yx, yy, b, Week.hi(ywd, nightT), ymid, Week.edge(ywd, nightT), (255f * fade).toInt())
             }
 
             // 2) 一缕星尘，沿一道弧线从昨天流向今天

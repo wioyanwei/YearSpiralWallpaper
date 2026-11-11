@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RadialGradient
 import android.graphics.Shader
@@ -41,6 +42,8 @@ class YearView(ctx: Context) : View(ctx) {
     private var geo: SpiralGeo? = null
     private var staticBmp: Bitmap? = null
     private var year = 0
+    private var todayWd = 0
+    private val todayMid: Int get() = Week.mid(todayWd, 0f)
     private val spherePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val specPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD7FFFFFF.toInt() }
@@ -62,6 +65,7 @@ class YearView(ctx: Context) : View(ctx) {
         val today = cal.get(Calendar.DAY_OF_YEAR)
         val total = cal.getActualMaximum(Calendar.DAY_OF_YEAR)
         val remain = total - today
+        todayWd = Week.weekday(year, today - 1)
         val fw = w.toFloat()
         val fh = h.toFloat()
         val u = min(fw * 0.44f, fh * 0.28f)
@@ -76,18 +80,24 @@ class YearView(ctx: Context) : View(ctx) {
         bg.shader = RadialGradient(cx, fh * 0.3f, max(fw, fh) * 0.85f, intArrayOf(pal.bg1, pal.bg2), floatArrayOf(0f, 0.8f), Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, fw, fh, bg)
 
-        val pastPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = pal.past }
+        val pastPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = pal.accent
             maskFilter = BlurMaskFilter(g.s * 5.2f, BlurMaskFilter.Blur.NORMAL)
         }
         for (k in 0 until total) {
             when {
-                k < g.todayIdx -> c.drawCircle(g.x[k], g.y[k], g.r[k], pastPaint)
+                k < g.todayIdx -> {
+                    pastPaint.color = Week.past(Week.weekday(year, k), 0f)
+                    c.drawCircle(g.x[k], g.y[k], g.r[k] * 1.2f * Week.PAST_SCALE, pastPaint)
+                }
                 k > g.todayIdx -> {
+                    val wd = Week.weekday(year, k)
                     val b = g.r[k] * 1.2f
+                    glow.color = Week.mid(wd, 0f)
+                    glow.alpha = 70
                     c.drawCircle(g.x[k], g.y[k], b, glow)
-                    sphere(c, g.x[k], g.y[k], b, pal.hi, pal.accent, pal.edge)
+                    sphere(c, g.x[k], g.y[k], b, Week.hi(wd, 0f), Week.mid(wd, 0f), Week.edge(wd, 0f))
                 }
             }
         }
@@ -131,11 +141,11 @@ class YearView(ctx: Context) : View(ctx) {
         val haloR = ball * (2.6f + 2.2f * pulse)
         haloPaint.shader = RadialGradient(
             x, y, haloR,
-            intArrayOf(withAlpha(pal.accent, (95 + 95 * pulse).toInt()), withAlpha(pal.accent, 0)),
+            intArrayOf(withAlpha(todayMid, (95 + 95 * pulse).toInt()), withAlpha(todayMid, 0)),
             null, Shader.TileMode.CLAMP
         )
         c.drawCircle(x, y, haloR, haloPaint)
-        sphere(c, x, y, ball, pal.hi, mix(pal.accent, pal.hot, 0.4f + 0.6f * pulse), mix(pal.edge, pal.accent, 0.5f * pulse))
+        sphere(c, x, y, ball, Week.hi(todayWd, 0f), mix(todayMid, Color.WHITE, 0.3f * pulse), mix(Week.edge(todayWd, 0f), todayMid, 0.5f * pulse))
 
         touch.step()
         touch.draw(c, g, pal, pal.accent, pal.hot, now, 0f, 0f, 0f, 0f, year, width.toFloat())

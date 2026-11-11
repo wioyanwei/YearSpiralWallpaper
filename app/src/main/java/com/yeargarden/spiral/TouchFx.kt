@@ -123,8 +123,10 @@ class TouchFx(sans: Typeface, serifItalic: Typeface, private val onTick: () -> U
                 val push = f2 * field * 0.2f
                 val nx = if (dist > 0.5f) dx / dist else 0f
                 val ny = if (dist > 0.5f) dy / dist else 0f
-                val rr = g.r[k] * (if (past) 1f else 1.2f) * (1f + 0.55f * f2)
-                val base = if (past) mix(pal.past, hot, 0.6f) else mix(accent, hot, 0.5f)
+                val rr = g.r[k] * 1.2f * (if (past) Week.PAST_SCALE else 1f) * (1f + 0.55f * f2)
+                val wd = Week.weekday(year, k)
+                val wc = Week.COLORS[wd]
+                val base = if (past) mix(Week.past(wd, 0f), wc, 0.6f) else mix(wc, Color.WHITE, 0.3f)
                 dotPaint.color = withAlpha(base, (255f * min(1f, f2 * 1.6f)).toInt())
                 c.drawCircle(px + nx * push, py + ny * push, rr, dotPaint)
             }
